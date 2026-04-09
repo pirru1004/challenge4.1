@@ -166,7 +166,9 @@
         <div class="legend-list">
           <div class="legend-item"><span class="legend-dot iss-dot"></span> ISS Current Position</div>
           <div class="legend-item"><span class="legend-dot track-dot"></span> Ground Track (past)</div>
+          <div class="legend-item"><span class="legend-dot future-dot"></span> Future Track (next 90m)</div>
           <div class="legend-item"><span class="legend-dot fov-dot"></span> Visibility Footprint</div>
+          <div class="legend-item"><span class="legend-dot night-dot"></span> Night Shadow (Real-time)</div>
         </div>
 
         <div class="panel-divider"></div>
@@ -195,8 +197,9 @@
     <span>Challenge 4.1 — ISS Dashboard · MSS26</span>
   </footer>
 
-  <!-- Leaflet JS -->
+  <!-- Map Plugins -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/@joergdietrich/leaflet.terminator"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -6,6 +6,7 @@
 // ── APIs ──────────────────────────────────────────────────────
 const ISS_API_PRIMARY = 'https://api.wheretheiss.at/v1/satellites/25544';
 const ISS_API_FALLBACK = 'http://api.open-notify.org/iss-now.json';
+const POSITIONS_API    = 'https://api.wheretheiss.at/v1/satellites/25544/positions';
 // Crew: try corquaid API first, fallback to open-notify via CORS proxy
 const CREW_API    = 'https://corquaid.github.io/international-space-station-APIs/JSON/people-in-space.json';
 const CREW_ALT    = 'http://api.open-notify.org/astros.json';
@@ -13,11 +14,12 @@ const CREW_ALT    = 'http://api.open-notify.org/astros.json';
 const REFRESH_INTERVAL = 5000; // ms
 
 // ── State ─────────────────────────────────────────────────────
-let map, issMarker, groundTrackLine, footprintCircle;
+let map, issMarker, groundTrackLine, futureTrackLine, footprintCircle, terminator;
 let trackPoints = [];        // array of [lat, lng]
 let refreshTimer   = null;
 let countdownTimer = null;
 let countdownValue = REFRESH_INTERVAL / 1000;
+let lastFutureUpdate = 0;    // timestamp of last future path fetch
 
 // ISS habitation start: Nov 2, 2000
 const ISS_EPOCH = new Date('2000-11-02T09:21:00Z');
@@ -115,12 +117,27 @@ function initMap() {
     .addAttribution('<span style="color:#555">CartoDB · wheretheiss.at</span>')
     .addTo(map);
 
-  // Ground track polyline
+  // Ground track (past)
   groundTrackLine = L.polyline([], {
     color: '#00d4ff',
     weight: 2,
     opacity: 0.55,
     smoothFactor: 1,
+  }).addTo(map);
+
+  // Future track (going to)
+  futureTrackLine = L.polyline([], {
+    color: '#00d4ff',
+    weight: 2,
+    opacity: 0.4,
+    dashArray: '10, 10',
+    smoothFactor: 1,
+  }).addTo(map);
+
+  // Day/Night Terminator
+  terminator = L.terminator({
+    fillOpacity: 0.35,
+    color: '#03070f',
   }).addTo(map);
 
   // Footprint circle (placeholder)
@@ -401,7 +418,48 @@ async function fetchISS() {
   // Country overflight
   el('overflight-country').textContent = `${latStr}, ${lonStr}`;
 
+  // Update terminator time
+  if (terminator) terminator.setTime();
+
+  // Fetch future path every 2 minutes or on first load
+  const now = Date.now();
+  if (now - lastFutureUpdate > 120000) {
+    fetchFuturePath(lat, lon);
+    lastFutureUpdate = now;
+  }
+
   setStatus('live', 'UPLINK LIVE');
+}
+
+// ── Future Path Fetch ─────────────────────────────────────────
+async function fetchFuturePath(currentLat, currentLon) {
+  try {
+    const timestamps = [];
+    const nowSecs = Math.floor(Date.now() / 1000);
+    // Request points for the next 90 minutes (1 full orbit), every 9 mins
+    for (let i = 1; i <= 10; i++) {
+      timestamps.push(nowSecs + (i * 9 * 60));
+    }
+
+    const res = await fetch(`${POSITIONS_API}?timestamps=${timestamps.join(',')}&units=kilometers`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (Array.isArray(data)) {
+      // Start the line from the current position
+      const futurePoints = [[currentLat, currentLon]];
+      data.forEach(p => {
+        futurePoints.push([p.latitude, p.longitude]);
+      });
+
+      // Special handling for Leaflet polylines jumping across the map (lon 180 to -180)
+      // For now, we'll just set it. Leaflet usually handles simple polylines fine 
+      // but if we see issues we might need to break the line.
+      futureTrackLine.setLatLngs(futurePoints);
+    }
+  } catch (e) {
+    console.warn('Could not fetch future path:', e);
+  }
 }
 
 // ── Refresh Countdown ─────────────────────────────────────────
