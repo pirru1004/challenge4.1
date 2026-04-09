@@ -462,10 +462,10 @@ body {
   flex-shrink: 0;
 }
 .iss-dot   { background: #ff6b2b; box-shadow: 0 0 6px #ff6b2b; }
-.track-dot { background: var(--accent-cyan); }
-.future-dot { background: transparent; border: 1px dashed var(--accent-cyan); opacity: 0.7; }
+.track-dot { background: var(--accent-cyan); height: 2px !important; border-radius: 0; }
+.future-dot { background: transparent; border: 1px dashed var(--accent-cyan); height: 2px !important; border-radius: 0; }
 .fov-dot   { background: rgba(0,212,255,0.3); border: 1px solid var(--accent-cyan); }
-.night-dot { background: rgba(3, 7, 15, 0.6); border: 1px solid var(--border); }
+.night-dot { background: rgba(3, 7, 15, 0.8); border: 1px solid var(--border); }
 
 /* -- Mission Elapsed Time -- */
 .met-display {
@@ -524,25 +524,18 @@ body {
 .app-footer a:hover { text-decoration: underline; }
 
 /* -- Leaflet Custom Marker -- */
-.iss-marker-icon {
-  background: none !important;
-  border: none !important;
-}
-
-.iss-marker-inner {
-  width: 36px; height: 36px;
-  background: var(--accent-orange);
-  border: 3px solid #fff;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.1rem;
-  box-shadow: 0 0 0 4px rgba(255,107,43,0.35), 0 0 20px rgba(255,107,43,0.6);
-  animation: issGlow 2s ease-in-out infinite;
+.iss-marker-image {
+  pointer-events: auto !important;
+  /* Filter for glow */
+  filter: drop-shadow(0 0 8px rgba(0,212,255,0.7));
+  transition: transform 0.5s ease-out;
+  /* Screen blend mode removes black background perfectly */
+  mix-blend-mode: screen; 
 }
 
 @keyframes issGlow {
-  0%,100% { box-shadow: 0 0 0 4px rgba(255,107,43,0.35), 0 0 20px rgba(255,107,43,0.6); }
-  50%      { box-shadow: 0 0 0 8px rgba(255,107,43,0.15), 0 0 30px rgba(255,107,43,0.8); }
+  0%,100% { filter: drop-shadow(0 0 10px rgba(255,107,43,0.6)); }
+  50%      { filter: drop-shadow(0 0 20px rgba(255,107,43,0.8)); }
 }
 
 /* -- Responsive -- */

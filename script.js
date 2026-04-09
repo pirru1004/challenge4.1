@@ -150,20 +150,20 @@ function initMap() {
     dashArray: '6 4',
   }).addTo(map);
 
-  // ISS Marker
-  const icon = L.divIcon({
-    className: 'iss-marker-icon',
-    html: '<div class="iss-marker-inner">🛰️</div>',
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
+  // ISS Marker Icon
+  const issIcon = L.icon({
+    iconUrl: 'iss-model.png?v=6',
+    iconSize: [60, 60],
+    iconAnchor: [30, 30],
+    className: 'iss-marker-image'
   });
 
-  issMarker = L.marker([0, 0], { icon, zIndexOffset: 1000 }).addTo(map);
+  issMarker = L.marker([0, 0], { icon: issIcon, zIndexOffset: 1000 }).addTo(map);
   issMarker.bindTooltip('ISS — International Space Station', {
     permanent: false,
     direction: 'top',
     className: 'iss-tooltip',
-    offset: [0, -20],
+    offset: [0, -30],
   });
 }
 
@@ -381,10 +381,23 @@ async function fetchISS() {
   // Pan map smoothly
   map.panTo([lat, lon], { animate: true, duration: 1.2 });
 
-  // Ground track (keep last 80 points)
+  // Ground track (past)
   trackPoints.push([lat, lon]);
   if (trackPoints.length > 80) trackPoints.shift();
-  groundTrackLine.setLatLngs(trackPoints);
+  
+  // Split past track if it wraps
+  const pastSegments = [];
+  let currentPastSeg = [trackPoints[0]];
+  for (let i = 1; i < trackPoints.length; i++) {
+    if (Math.abs(trackPoints[i][1] - trackPoints[i-1][1]) > 200) {
+      pastSegments.push(currentPastSeg);
+      currentPastSeg = [trackPoints[i]];
+    } else {
+      currentPastSeg.push(trackPoints[i]);
+    }
+  }
+  pastSegments.push(currentPastSeg);
+  groundTrackLine.setLatLngs(pastSegments);
 
   // Header coords
   const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N':'S'}`;
@@ -434,32 +447,73 @@ async function fetchISS() {
 // ── Future Path Fetch ─────────────────────────────────────────
 async function fetchFuturePath(currentLat, currentLon) {
   try {
-    const timestamps = [];
+    const batches = [];
     const nowSecs = Math.floor(Date.now() / 1000);
-    // Request points for the next 90 minutes (1 full orbit), every 9 mins
-    for (let i = 1; i <= 10; i++) {
-      timestamps.push(nowSecs + (i * 9 * 60));
+    
+    // Extreme high-res: 50 points over 90 mins (~1.8 min spacing)
+    for (let b = 0; b < 5; b++) {
+      const batch = [];
+      for (let i = 1; i <= 10; i++) {
+        batch.push(nowSecs + ((b * 10 + i) * 1.8 * 60));
+      }
+      batches.push(batch);
     }
 
-    const res = await fetch(`${POSITIONS_API}?timestamps=${timestamps.join(',')}&units=kilometers`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const responses = await Promise.all(batches.map(b => 
+      fetch(`${POSITIONS_API}?timestamps=${b.join(',')}&units=kilometers`).then(r => r.json())
+    ));
+    
+    const combinedData = responses.flat();
 
-    if (Array.isArray(data)) {
-      // Start the line from the current position
-      const futurePoints = [[currentLat, currentLon]];
-      data.forEach(p => {
-        futurePoints.push([p.latitude, p.longitude]);
+    if (Array.isArray(combinedData)) {
+      const allPoints = [[currentLat, currentLon]];
+      combinedData.forEach(p => {
+        allPoints.push([p.latitude, p.longitude]);
       });
 
-      // Special handling for Leaflet polylines jumping across the map (lon 180 to -180)
-      // For now, we'll just set it. Leaflet usually handles simple polylines fine 
-      // but if we see issues we might need to break the line.
-      futureTrackLine.setLatLngs(futurePoints);
+      // Split segments that cross the 180/-180 meridian to avoid map-spanning lines
+      const multiSegments = [];
+      let currentSegment = [allPoints[0]];
+
+      for (let i = 1; i < allPoints.length; i++) {
+        const prev = allPoints[i-1];
+        const curr = allPoints[i];
+        
+        // Use a threshold of 200 to be safe for dateline wrapping
+        if (Math.abs(curr[1] - prev[1]) > 200) {
+          multiSegments.push(currentSegment);
+          currentSegment = [curr];
+        } else {
+          currentSegment.push(curr);
+        }
+      }
+      multiSegments.push(currentSegment);
+
+      // setLatLngs with nested array creates separate segments
+      futureTrackLine.setLatLngs(multiSegments);
+
+      // Rotate marker based on heading to first future point
+      if (combinedData.length > 0) {
+        const angle = calculateHeading(currentLat, currentLon, combinedData[0].latitude, combinedData[0].longitude);
+        const markerEl = document.querySelector('.iss-marker-image');
+        if (markerEl) {
+          // Adjust rotation (0 = North, most images are North-aligned)
+          markerEl.style.transform += ` rotate(${angle}deg)`;
+          markerEl.style.mixBlendMode = 'screen';
+        }
+      }
     }
   } catch (e) {
     console.warn('Could not fetch future path:', e);
   }
+}
+
+function calculateHeading(lat1, lon1, lat2, lon2) {
+  const y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
+  const bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360;
 }
 
 // ── Refresh Countdown ─────────────────────────────────────────
