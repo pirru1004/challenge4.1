@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ISS Dashboard | Real-Time Tracking</title>
+  <meta name="description" content="Live International Space Station tracking dashboard. Real-time position, crew manifest, and orbital parameters.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Starfield Canvas -->
+  <canvas id="starfield"></canvas>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <div class="iss-icon">🛰️</div>
+        <div>
+          <h1>ISS DASHBOARD</h1>
+          <p class="header-sub">International Space Station — Live Operations</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text" id="status-text">INITIALIZING…</span>
+        <div class="header-clock" id="utc-clock">UTC 00:00:00</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="dashboard">
+
+    <!-- Row 1: Map (large) + Orbital Data -->
+    <div class="row row-top">
+
+      <!-- Map Panel -->
+      <section class="panel panel-map" aria-label="ISS World Map">
+        <div class="panel-header">
+          <span class="panel-label">GROUND TRACK</span>
+          <span class="panel-badge" id="map-coords">--° N  --° E</span>
+        </div>
+        <div id="map"></div>
+        <div class="map-footer">
+          <span>●&nbsp; ISS Position</span>
+          <span class="overflight-label" id="overflight-country">Locating…</span>
+        </div>
+      </section>
+
+      <!-- Orbital Parameters Panel -->
+      <section class="panel panel-orbital" aria-label="Orbital Parameters">
+        <div class="panel-header">
+          <span class="panel-label">ORBITAL PARAMETERS</span>
+        </div>
+        <div class="orbital-grid">
+          <div class="orbit-card" id="card-altitude">
+            <div class="orbit-icon">📡</div>
+            <div class="orbit-value" id="altitude-val">---</div>
+            <div class="orbit-unit">km altitude</div>
+            <div class="orbit-bar"><div class="orbit-bar-fill" id="alt-bar"></div></div>
+          </div>
+          <div class="orbit-card" id="card-velocity">
+            <div class="orbit-icon">⚡</div>
+            <div class="orbit-value" id="velocity-val">---</div>
+            <div class="orbit-unit">km/h velocity</div>
+            <div class="orbit-bar"><div class="orbit-bar-fill" id="vel-bar"></div></div>
+          </div>
+          <div class="orbit-card" id="card-period">
+            <div class="orbit-icon">🔄</div>
+            <div class="orbit-value" id="period-val">---</div>
+            <div class="orbit-unit">min orbit period</div>
+            <div class="orbit-bar"><div class="orbit-bar-fill" id="per-bar"></div></div>
+          </div>
+          <div class="orbit-card" id="card-inclination">
+            <div class="orbit-icon">📐</div>
+            <div class="orbit-value" id="inclination-val">---</div>
+            <div class="orbit-unit">° inclination</div>
+            <div class="orbit-bar"><div class="orbit-bar-fill" id="inc-bar"></div></div>
+          </div>
+          <div class="orbit-card orbit-card-wide">
+            <div class="orbit-icon">🌍</div>
+            <div class="orbit-value" id="footprint-val">---</div>
+            <div class="orbit-unit">km visibility footprint</div>
+          </div>
+          <div class="orbit-card orbit-card-wide">
+            <div class="orbit-icon">💡</div>
+            <div class="orbit-value" id="daynight-val">---</div>
+            <div class="orbit-unit">solar condition</div>
+          </div>
+        </div>
+
+        <!-- Live Update Ticker -->
+        <div class="update-ticker">
+          <span class="ticker-dot"></span> Next update in <span id="countdown-refresh">5</span>s
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Row 2: Crew + Ground Track History -->
+    <div class="row row-bottom">
+
+      <!-- Crew Manifest Panel -->
+      <section class="panel panel-crew" aria-label="Crew Manifest">
+        <div class="panel-header">
+          <span class="panel-label">CREW MANIFEST</span>
+          <span class="panel-badge" id="crew-count">-- aboard</span>
+        </div>
+        <div class="crew-list" id="crew-list">
+          <div class="crew-loading">
+            <div class="spinner"></div>
+            <span>Contacting station…</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pass Timeline / Stats -->
+      <section class="panel panel-stats" aria-label="Mission Stats">
+        <div class="panel-header">
+          <span class="panel-label">MISSION STATS</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">LATITUDE</div>
+            <div class="stat-val" id="stat-lat">--°</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">LONGITUDE</div>
+            <div class="stat-val" id="stat-lon">--°</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">ORBITS/DAY</div>
+            <div class="stat-val" id="stat-orbits">~15.5</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">SOLAR ARRAY</div>
+            <div class="stat-val">2,500 m²</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">MASS</div>
+            <div class="stat-val">420,000 kg</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">LENGTH</div>
+            <div class="stat-val">109 m</div>
+          </div>
+        </div>
+
+        <div class="panel-divider"></div>
+
+        <!-- Ground Track Color Legend -->
+        <div class="panel-header" style="margin-top: 0.5rem;">
+          <span class="panel-label">MAP LEGEND</span>
+        </div>
+        <div class="legend-list">
+          <div class="legend-item"><span class="legend-dot iss-dot"></span> ISS Current Position</div>
+          <div class="legend-item"><span class="legend-dot track-dot"></span> Ground Track (past)</div>
+          <div class="legend-item"><span class="legend-dot fov-dot"></span> Visibility Footprint</div>
+        </div>
+
+        <div class="panel-divider"></div>
+
+        <!-- Mission Time -->
+        <div class="panel-header" style="margin-top: 0.5rem;">
+          <span class="panel-label">MISSION ELAPSED TIME</span>
+        </div>
+        <div class="met-display" id="met-display">
+          <span class="met-item"><span class="met-val" id="met-d">0000</span><span class="met-label">d</span></span>
+          <span class="met-sep">:</span>
+          <span class="met-item"><span class="met-val" id="met-h">00</span><span class="met-label">h</span></span>
+          <span class="met-sep">:</span>
+          <span class="met-item"><span class="met-val" id="met-m">00</span><span class="met-label">m</span></span>
+          <span class="met-sep">:</span>
+          <span class="met-item"><span class="met-val" id="met-s">00</span><span class="met-label">s</span></span>
+        </div>
+        <p class="met-note">ISS continuous habitation since Nov 2, 2000</p>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <span>Data: <a href="https://wheretheiss.at" target="_blank" rel="noopener">wheretheiss.at</a> · <a href="https://open-notify.org" target="_blank" rel="noopener">Open Notify</a></span>
+    <span>Challenge 4.1 — ISS Dashboard · MSS26</span>
+  </footer>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="script.js"></script>
+</body>
+</html>
