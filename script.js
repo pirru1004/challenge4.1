@@ -4,10 +4,11 @@
    ========================================= */
 
 // ── APIs ──────────────────────────────────────────────────────
-const ISS_API     = 'https://api.wheretheiss.at/v1/satellites/25544';
-// Crew: try open-notify via CORS proxy, fallback to hardcoded manifest
+const ISS_API_PRIMARY = 'https://api.wheretheiss.at/v1/satellites/25544';
+const ISS_API_FALLBACK = 'http://api.open-notify.org/iss-now.json';
+// Crew: try corquaid API first, fallback to open-notify via CORS proxy
 const CREW_API    = 'https://corquaid.github.io/international-space-station-APIs/JSON/people-in-space.json';
-const CREW_ALT    = 'http://api.open-notify.org/astros.json'; // fallback (may be blocked by CORS on Pages)
+const CREW_ALT    = 'http://api.open-notify.org/astros.json';
 
 const REFRESH_INTERVAL = 5000; // ms
 
@@ -192,13 +193,19 @@ async function fetchCrew() {
     const res  = await fetch(CREW_API);
     const data = await res.json();
 
-    // corquaid API shape: { number, people: [{id, name, country, flag_code, title, ...}] }
+    // corquaid API shape: { number, people: [{id, name, country, flag_code, iss: bool, ...}] }
     let people = [];
     if (data.people) {
-      people = data.people.filter(p => p.title === 'ISS' || !p.title || p.location?.includes('ISS') || true);
+      // Filter to only show ISS crew members (not Tiangong, Artemis, etc.)
+      people = data.people.filter(p => p.iss === true);
     }
 
-    renderCrew(people);
+    if (people.length > 0) {
+      renderCrew(people);
+    } else {
+      console.warn('No ISS crew found in corquaid API, trying fallback…');
+      await fetchCrewFallback();
+    }
   } catch (e) {
     console.warn('Crew API failed, retrying open-notify…', e);
     await fetchCrewFallback();
@@ -290,67 +297,111 @@ function renderCrewError() {
 }
 
 // ── ISS Position Fetch ────────────────────────────────────────
-async function fetchISS() {
-  try {
-    const res  = await fetch(ISS_API + '?units=kilometers&timestamp=' + Date.now());
-    const d    = await res.json();
+async function fetchISSPrimary() {
+  const res = await fetch(ISS_API_PRIMARY + '?units=kilometers&timestamp=' + Date.now());
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const d = await res.json();
+  return {
+    lat:  d.latitude,
+    lon:  d.longitude,
+    alt:  d.altitude,
+    vel:  d.velocity,
+    vis:  d.visibility,
+    foot: d.footprint,
+  };
+}
 
-    const lat   = d.latitude;
-    const lon   = d.longitude;
-    const alt   = d.altitude;          // km
-    const vel   = d.velocity;          // km/h
-    const vis   = d.visibility;        // 'eclipsed' | 'daylight'
-    const foot  = d.footprint;         // km diameter → radius
-    const units = d.units;
-
-    // Update map
-    issMarker.setLatLng([lat, lon]);
-    footprintCircle.setLatLng([lat, lon]);
-    footprintCircle.setRadius((foot / 2) * 1000); // m
-
-    // Pan map smoothly
-    map.panTo([lat, lon], { animate: true, duration: 1.2 });
-
-    // Ground track (keep last 80 points)
-    trackPoints.push([lat, lon]);
-    if (trackPoints.length > 80) trackPoints.shift();
-    groundTrackLine.setLatLngs(trackPoints);
-
-    // Header coords
-    const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N':'S'}`;
-    const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E':'W'}`;
-    el('map-coords').textContent = `${latStr}  ${lonStr}`;
-
-    // Orbital parameters
-    const period   = (2 * Math.PI * (6371 + alt)) / vel * 60; // minutes
-    const orbitsDay = 1440 / period;
-
-    el('altitude-val').textContent   = alt.toFixed(1);
-    el('velocity-val').textContent   = Math.round(vel).toLocaleString();
-    el('period-val').textContent     = period.toFixed(1);
-    el('inclination-val').textContent = '51.6';
-    el('footprint-val').textContent  = Math.round(foot).toLocaleString();
-    el('daynight-val').textContent   = vis === 'daylight' ? '☀️ Daylight' : '🌑 Eclipsed';
-
-    // Progress bars (normalized)
-    el('alt-bar').style.width = `${((alt - 380) / 40 * 100).toFixed(1)}%`;
-    el('vel-bar').style.width = `${((vel - 25000) / 3000 * 100).toFixed(1)}%`;
-    el('per-bar').style.width = `${((period - 89) / 5 * 100).toFixed(1)}%`;
-    el('inc-bar').style.width = '80%';
-
-    // Stat panel
-    el('stat-lat').textContent = latStr;
-    el('stat-lon').textContent = lonStr;
-    el('stat-orbits').textContent = `~${orbitsDay.toFixed(1)}`;
-
-    // Country overflight (reverse-geocode via nominatim occasionally)
-    el('overflight-country').textContent = `${latStr}, ${lonStr}`;
-
-    setStatus('live', 'UPLINK LIVE');
-  } catch (e) {
-    console.error('ISS API error:', e);
-    setStatus('error', 'SIGNAL LOST');
+async function fetchISSFallback() {
+  // open-notify only gives lat/lon; compute approximate orbital params
+  const proxies = [
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent('http://api.open-notify.org/iss-now.json'),
+    'https://corsproxy.io/?' + encodeURIComponent('http://api.open-notify.org/iss-now.json'),
+  ];
+  for (const url of proxies) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const d = await res.json();
+      if (d.iss_position) {
+        return {
+          lat:  parseFloat(d.iss_position.latitude),
+          lon:  parseFloat(d.iss_position.longitude),
+          alt:  420,        // typical ISS altitude
+          vel:  27580,      // typical ISS velocity km/h
+          vis:  'unknown',
+          foot: 4500,       // typical footprint km
+        };
+      }
+    } catch (e) {
+      console.warn('Fallback proxy failed:', url);
+    }
   }
+  throw new Error('All ISS APIs failed');
+}
+
+async function fetchISS() {
+  let data;
+  try {
+    data = await fetchISSPrimary();
+  } catch (e1) {
+    console.warn('Primary ISS API failed, trying fallback…', e1);
+    try {
+      data = await fetchISSFallback();
+    } catch (e2) {
+      console.error('All ISS APIs failed:', e2);
+      setStatus('error', 'SIGNAL LOST');
+      return;
+    }
+  }
+
+  const { lat, lon, alt, vel, vis, foot } = data;
+
+  // Update map
+  issMarker.setLatLng([lat, lon]);
+  footprintCircle.setLatLng([lat, lon]);
+  footprintCircle.setRadius((foot / 2) * 1000); // m
+
+  // Pan map smoothly
+  map.panTo([lat, lon], { animate: true, duration: 1.2 });
+
+  // Ground track (keep last 80 points)
+  trackPoints.push([lat, lon]);
+  if (trackPoints.length > 80) trackPoints.shift();
+  groundTrackLine.setLatLngs(trackPoints);
+
+  // Header coords
+  const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N':'S'}`;
+  const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E':'W'}`;
+  el('map-coords').textContent = `${latStr}  ${lonStr}`;
+
+  // Orbital parameters
+  const period    = (2 * Math.PI * (6371 + alt)) / vel * 60; // minutes
+  const orbitsDay = 1440 / period;
+
+  el('altitude-val').textContent   = alt.toFixed(1);
+  el('velocity-val').textContent   = Math.round(vel).toLocaleString();
+  el('period-val').textContent     = period.toFixed(1);
+  el('inclination-val').textContent = '51.6';
+  el('footprint-val').textContent  = Math.round(foot).toLocaleString();
+  el('daynight-val').textContent   = vis === 'daylight' ? '☀️ Daylight'
+                                   : vis === 'eclipsed' ? '🌑 Eclipsed'
+                                   : '🌗 Calculating…';
+
+  // Progress bars (normalized)
+  el('alt-bar').style.width = `${Math.min(100, Math.max(5, (alt - 380) / 40 * 100)).toFixed(1)}%`;
+  el('vel-bar').style.width = `${Math.min(100, Math.max(5, (vel - 25000) / 3000 * 100)).toFixed(1)}%`;
+  el('per-bar').style.width = `${Math.min(100, Math.max(5, (period - 89) / 5 * 100)).toFixed(1)}%`;
+  el('inc-bar').style.width = '80%';
+
+  // Stat panel
+  el('stat-lat').textContent = latStr;
+  el('stat-lon').textContent = lonStr;
+  el('stat-orbits').textContent = `~${orbitsDay.toFixed(1)}`;
+
+  // Country overflight
+  el('overflight-country').textContent = `${latStr}, ${lonStr}`;
+
+  setStatus('live', 'UPLINK LIVE');
 }
 
 // ── Refresh Countdown ─────────────────────────────────────────
